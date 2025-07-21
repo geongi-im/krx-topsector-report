@@ -1,3 +1,7 @@
+CLAUDE.md
+settings.local.json
+source.png
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
