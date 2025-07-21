@@ -21,13 +21,18 @@ class SectorLeaderTracker:
                     self.logger.warning(f"거래일 {trade_date}, 시장 {market_type}에 대장주 데이터가 없습니다.")
                     continue
                 
+                # 기존 대장주 정보 조회
+                existing_leaders = self._get_existing_leaders(conn, market_type)
+                
                 leaders_with_streak = []
                 for industry, stocks in current_leaders.items():
                     for rank, stock in enumerate(stocks[:2], 1):
                         consecutive_days = self._calculate_consecutive_days(
                             conn, industry, rank, stock['stock_code'], market_type, trade_date
                         )
-                        
+                        # 이전 종목명은 메모리에서만 비교(리포트용)
+                        key = (industry, rank)
+                        prev_stock_name = existing_leaders.get(key, {}).get('stock_name')
                         leader_data = {
                             'industry': industry,
                             'rank_position': rank,
@@ -35,12 +40,18 @@ class SectorLeaderTracker:
                             'stock_name': stock['stock_name'],
                             'market_cap': stock['market_cap'],
                             'consecutive_days': consecutive_days,
-                            'market_type': market_type
+                            'market_type': market_type,
+                            'prev_stock_name': prev_stock_name if prev_stock_name != stock['stock_name'] else None
                         }
                         leaders_with_streak.append(leader_data)
                 
-                if leaders_with_streak:
-                    inserted_count = insert_sector_leaders(conn, leaders_with_streak)
+                # DB 저장시 prev_stock_name은 제외
+                db_leaders = [
+                    {k: v for k, v in leader.items() if k not in ('prev_stock_name',)}
+                    for leader in leaders_with_streak
+                ]
+                if db_leaders:
+                    inserted_count = insert_sector_leaders(conn, db_leaders)
                     total_updated_count += inserted_count
                     self.logger.info(f"{market_type} 업종별 대장주 업데이트 완료 - {len(current_leaders)}개 업종, {inserted_count}개 레코드")
 
@@ -90,6 +101,42 @@ class SectorLeaderTracker:
             self.logger.error(f"업종별 상위 종목 조회 오류 ({market_type}): {e}")
             return {}
 
+    def _get_existing_leaders(self, conn, market_type):
+        """
+        현재 DB에 저장된 기존 대장주 정보를 조회합니다.
+        
+        Args:
+            conn: DB 연결 객체
+            market_type: 시장 구분 (KOSPI/KOSDAQ)
+        
+        Returns:
+            dict: {(industry, rank_position): {'stock_name': 종목명, 'stock_code': 종목코드}} 형태
+        """
+        try:
+            with conn.cursor() as cursor:
+                sql = """
+                SELECT industry, rank_position, stock_code, stock_name
+                FROM krx_sector_leaders 
+                WHERE market_type = %s
+                """
+                cursor.execute(sql, (market_type,))
+                results = cursor.fetchall()
+            
+            existing_leaders = {}
+            for row in results:
+                key = (row['industry'], row['rank_position'])
+                existing_leaders[key] = {
+                    'stock_name': row['stock_name'],
+                    'stock_code': row['stock_code']
+                }
+            
+            self.logger.debug(f"{market_type} 기존 대장주 조회 완료 - {len(existing_leaders)}개 레코드")
+            return existing_leaders
+            
+        except Exception as e:
+            self.logger.error(f"기존 대장주 조회 오류 ({market_type}): {e}")
+            return {}
+
     def _calculate_consecutive_days(self, conn, industry, rank_position, stock_code, market_type, trade_date):
         """
         연속 유지 일수를 계산합니다.
@@ -111,15 +158,14 @@ class SectorLeaderTracker:
                     # 같은 종목이 계속 유지되는 경우
                     if current_record['stock_code'] == stock_code:
                         new_consecutive_days = current_record['consecutive_days'] + 1
-                        self.logger.debug(f"{industry} {rank_position}위 {stock_code}: {current_record['consecutive_days']}일 -> {new_consecutive_days}일")
                         return new_consecutive_days
                     else:
                         # 다른 종목으로 변경된 경우 1일로 리셋
-                        self.logger.info(f"{industry} {rank_position}위 변경: {current_record['stock_code']} -> {stock_code} (1일)")
+                        self.logger.info(f"{industry} {rank_position}위 변경: {current_record['stock_code']} -> {stock_code}")
                         return 1
                 else:
                     # 새로운 업종/순위 조합인 경우
-                    self.logger.info(f"{industry} {rank_position}위 신규 등록: {stock_code} (1일)")
+                    self.logger.info(f"{industry} {rank_position}위 신규 등록: {stock_code}")
                     return 1
                     
         except Exception as e:
@@ -221,13 +267,8 @@ class SectorLeaderTracker:
                     if target_stock and target_stock['stock_code'] == current_stock_code:
                         # 같은 종목이면 연속일수 증가
                         consecutive_days += 1
-                        self.logger.debug(f"{trade_date}: {industry} {rank_position}위 {current_stock_code} 연속 ({consecutive_days}일)")
                     else:
                         # 다른 종목이거나 데이터가 없으면 중단
-                        if target_stock:
-                            self.logger.debug(f"{trade_date}: {industry} {rank_position}위 변경 {target_stock['stock_code']} != {current_stock_code}")
-                        else:
-                            self.logger.debug(f"{trade_date}: {industry} {rank_position}위 데이터 없음")
                         break
                 
                 return max(consecutive_days, 1)  # 최소 1일
@@ -278,8 +319,6 @@ class SectorLeaderTracker:
                     stock_code = leader['stock_code']
                     stock_name = leader['stock_name']
                     
-                    self.logger.info(f"진행률: {i}/{total_count} - {market_type} {industry} {rank_position}위 {stock_name}({stock_code})")
-                    
                     # 과거 데이터 기반으로 연속일수 계산
                     consecutive_days = self.calculate_historical_consecutive_days(
                         conn, market_type, industry, rank_position, stock_code, latest_date
@@ -296,7 +335,6 @@ class SectorLeaderTracker:
                         
                         if update_cursor.rowcount > 0:
                             updated_count += 1
-                            self.logger.info(f"업데이트 완료: {market_type} {industry} {rank_position}위 {stock_name} -> {consecutive_days}일")
                         
                 except Exception as e:
                     self.logger.error(f"개별 레코드 업데이트 실패 ({leader}): {e}")

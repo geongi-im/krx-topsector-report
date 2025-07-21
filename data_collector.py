@@ -58,14 +58,6 @@ class KRXDataCollector:
             fetcher = 업종분류현황()
             raw_data = fetcher.fetch(date_str, market)
             
-            # 디버깅용 로그 추가
-            self.logger.debug(f"API 응답 타입: {type(raw_data)}")
-            if raw_data is not None:
-                self.logger.debug(f"API 응답 크기: {len(raw_data) if hasattr(raw_data, '__len__') else 'N/A'}")
-                if hasattr(raw_data, 'columns'):
-                    self.logger.debug(f"컬럼명: {list(raw_data.columns)}")
-                if hasattr(raw_data, 'empty'):
-                    self.logger.debug(f"데이터 비어있음: {raw_data.empty}")
             
             if raw_data is None or (hasattr(raw_data, 'empty') and raw_data.empty):
                 self.logger.warning(f"API에서 빈 데이터 반환 - 날짜: {date_str}, 시장: {market}")
@@ -106,10 +98,6 @@ class KRXDataCollector:
                     industry = get_column_value(row, column_mapping['업종명'])
                     close_price = get_column_value(row, column_mapping['종가'])
                     
-                    # 첫 번째 행 디버깅
-                    if processed_count == 0:
-                        self.logger.debug(f"첫 번째 행 원본 데이터: {dict(row)}")
-                        self.logger.debug(f"추출된 값 - 종목코드: {stock_code}, 종목명: {stock_name}, 종가: {close_price}")
                     
                     stock_data = {
                         'stock_code': str(stock_code).strip() if stock_code else '',
@@ -128,9 +116,6 @@ class KRXDataCollector:
                         stock_data['stock_name'] and 
                         stock_data['close_price'] is not None):
                         stock_data_list.append(stock_data)
-                    else:
-                        if processed_count < 5:  # 처음 5개만 디버그 로그
-                            self.logger.debug(f"데이터 불완전으로 제외: {stock_data}")
                         
                     processed_count += 1
                         
@@ -138,22 +123,13 @@ class KRXDataCollector:
                     self.logger.error(f"개별 종목 데이터 처리 오류: {e}, row: {dict(row)}")
                     continue
             
-            self.logger.info(f"데이터 수집 완료 - {len(stock_data_list)}개 종목 (날짜: {date_str}, 시장: {market}, 처리된 행: {processed_count})")
+            self.logger.info(f"데이터 수집 완료 - {len(stock_data_list)}개 종목 (날짜: {date_str}, 시장: {market})")
             
-            # 결과가 없는 경우 추가 디버깅
-            if len(stock_data_list) == 0 and processed_count > 0:
-                self.logger.warning(f"처리된 행은 있지만 유효한 데이터가 없음 - 컬럼명 확인 필요")
-                # 첫 번째 행의 모든 컬럼 출력
-                if not raw_data.empty:
-                    sample_row = raw_data.iloc[0]
-                    self.logger.warning(f"샘플 행 데이터: {dict(sample_row)}")
             
             return stock_data_list
             
         except Exception as e:
             self.logger.error(f"KRX 데이터 수집 오류 - 날짜: {date_str}, 시장: {market}, 오류: {e}")
-            import traceback
-            self.logger.error(f"상세 오류: {traceback.format_exc()}")
             raise
     
     

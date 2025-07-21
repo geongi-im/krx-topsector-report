@@ -107,14 +107,12 @@ class RSICalculator:
                 result = cursor.fetchall()
                 
                 if not result:
-                    self.logger.debug(f"RSI 계산용 데이터 없음 - 종목: {stock_code}, 기준일: {trade_date}")
                     return {'rsi_d': None, 'rsi_w': None, 'rsi_m': None}
                 
                 # 시간 순서대로 정렬 (과거 -> 현재)
                 prices = [row['close_price'] for row in reversed(result) if row['close_price'] is not None]
                 
                 if len(prices) < max(rsi_periods.values()) + 1:
-                    self.logger.debug(f"RSI 계산용 데이터 부족 - 종목: {stock_code}, 데이터 개수: {len(prices)}, 필요: {max(rsi_periods.values()) + 1}")
                     return {'rsi_d': None, 'rsi_w': None, 'rsi_m': None}
                 
                 # 각 기간별 RSI 계산
@@ -201,7 +199,6 @@ class RSICalculator:
                                 failed_stocks += 1
                                 
                         except Exception as e:
-                            self.logger.debug(f"개별 종목 RSI 계산 실패 - {stock_code}: {e}")
                             failed_stocks += 1
                             continue
                     
@@ -216,13 +213,8 @@ class RSICalculator:
                     
                     sector_rsi_list.append(sector_rsi)
                     
-                    rsi_d_str = f"{sector_rsi['rsi_d']:.2f}" if sector_rsi['rsi_d'] is not None else 'N/A'
-                    total_stocks = len(stock_codes)
-                    
-                    if sector_rsi['rsi_d'] is not None:
-                        self.logger.info(f"업종 RSI 계산 완료 - {market_type} {industry}: 총 {total_stocks}개 종목 중 {valid_stocks}개 유효, 일간RSI: {rsi_d_str}")
-                    else:
-                        self.logger.warning(f"업종 RSI 계산 불가 - {market_type} {industry}: 총 {total_stocks}개 종목 중 유효한 RSI 데이터가 없음")
+                    if sector_rsi['rsi_d'] is None:
+                        self.logger.warning(f"업종 RSI 계산 불가 - {market_type} {industry}: 유효한 RSI 데이터 없음")
                     
                 except Exception as e:
                     self.logger.error(f"업종 RSI 계산 오류 - {market_type} {industry}: {e}")

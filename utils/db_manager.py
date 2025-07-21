@@ -105,14 +105,9 @@ def create_tables_if_not_exists(conn):
             cursor.execute(CREATE_KRX_SECTOR_RSI_TABLE)
             logger.info("'krx_sector_rsi' 테이블이 새로운 구조로 생성되었습니다.")
 
-            # krx_sector_leaders 테이블 재생성
-            try:
-                cursor.execute("DROP TABLE IF EXISTS krx_sector_leaders")
-                logger.info("기존 'krx_sector_leaders' 테이블을 삭제했습니다.")
-            except pymysql.MySQLError as e:
-                logger.warning(f"'krx_sector_leaders' 테이블 삭제 실패 (무시): {e}")
+            # krx_sector_leaders 테이블 생성
             cursor.execute(CREATE_KRX_SECTOR_LEADERS_TABLE)
-            logger.info("'krx_sector_leaders' 테이블이 새로운 구조로 생성되었습니다.")
+            logger.info("'krx_sector_leaders' 테이블이 준비되었습니다.")
             
             conn.commit()
         except pymysql.MySQLError as e:
@@ -128,7 +123,6 @@ def delete_old_stock_data(conn, days=100):
             cursor.execute(sql, (days,))
             deleted_count = cursor.rowcount
             conn.commit()
-            logger.info(f"{deleted_count}개의 오래된 주식 데이터가 삭제되었습니다. ({days}일 이전)")
             return deleted_count
         except pymysql.MySQLError as e:
             logger.error(f"오래된 데이터 삭제 오류: {e}")
@@ -138,7 +132,6 @@ def delete_old_stock_data(conn, days=100):
 def insert_stock_data(conn, stock_data_list):
     """krx_stock 테이블에 주식 데이터를 일괄 삽입합니다."""
     if not stock_data_list:
-        logger.info("삽입할 주식 데이터가 없습니다.")
         return 0
     
     with conn.cursor() as cursor:
@@ -173,7 +166,6 @@ def insert_stock_data(conn, stock_data_list):
             cursor.executemany(sql, values_to_insert)
             inserted_count = cursor.rowcount
             conn.commit()
-            logger.info(f"{inserted_count}개의 주식 데이터가 성공적으로 삽입/업데이트되었습니다.")
             return inserted_count
         except pymysql.MySQLError as e:
             logger.error(f"주식 데이터 삽입 오류: {e}")
@@ -201,7 +193,6 @@ def get_stock_data_for_rsi(conn, stock_code, days=30):
 def insert_sector_rsi(conn, sector_rsi_list):
     """krx_sector_rsi 테이블에 업종별 RSI 데이터를 삽입합니다."""
     if not sector_rsi_list:
-        logger.info("삽입할 섹터 RSI 데이터가 없습니다.")
         return 0
     
     with conn.cursor() as cursor:
@@ -231,7 +222,6 @@ def insert_sector_rsi(conn, sector_rsi_list):
             cursor.executemany(sql, values_to_insert)
             inserted_count = cursor.rowcount
             conn.commit()
-            logger.info(f"{inserted_count}개의 섹터 RSI 데이터가 성공적으로 삽입/업데이트되었습니다.")
             return inserted_count
         except pymysql.MySQLError as e:
             logger.error(f"섹터 RSI 데이터 삽입 오류: {e}")
@@ -268,7 +258,6 @@ def get_latest_sector_rsi(conn, trade_date=None):
 def insert_sector_leaders(conn, sector_leaders_list):
     """krx_sector_leaders 테이블에 업종별 대장주 데이터를 삽입합니다."""
     if not sector_leaders_list:
-        logger.info("삽입할 섹터 대장주 데이터가 없습니다.")
         return 0
     
     with conn.cursor() as cursor:
@@ -300,7 +289,6 @@ def insert_sector_leaders(conn, sector_leaders_list):
             cursor.executemany(sql, values_to_insert)
             inserted_count = cursor.rowcount
             conn.commit()
-            logger.info(f"{inserted_count}개의 섹터 대장주 데이터가 성공적으로 삽입/업데이트되었습니다.")
             return inserted_count
         except pymysql.MySQLError as e:
             logger.error(f"섹터 대장주 데이터 삽입 오류: {e}")

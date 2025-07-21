@@ -36,7 +36,6 @@ def main():
             cursor.execute("SELECT COUNT(*) as count FROM krx_sector_leaders WHERE consecutive_days = 1")
             one_day_records = cursor.fetchone()['count']
             
-            logger.info(f"재계산 전 상태: 전체 {total_records}개 레코드 중 {one_day_records}개가 1일")
         
         # 연속일수 재계산 실행
         updated_count = tracker.recalculate_all_consecutive_days(conn)
@@ -54,7 +53,6 @@ def main():
             """)
             stats = cursor.fetchone()
             
-            logger.info(f"재계산 후 상태: {one_day_records_after}개가 1일, 평균 {stats['avg_days']:.2f}일, 범위 {stats['min_days']}~{stats['max_days']}일")
         
         # 샘플 결과 출력
         with conn.cursor() as cursor:
@@ -67,11 +65,6 @@ def main():
             """)
             top_streaks = cursor.fetchall()
             
-            if top_streaks:
-                logger.info("연속일수 상위 10개:")
-                for i, record in enumerate(top_streaks, 1):
-                    logger.info(f"  {i}. {record['market_type']} {record['industry']} {record['rank_position']}위 "
-                              f"{record['stock_name']} - {record['consecutive_days']}일 연속")
         
         logger.info(f"=== 연속일수 재계산 완료 - {updated_count}개 레코드 업데이트 ===")
         return True

@@ -64,7 +64,6 @@ class KRXReportService:
                 max_search_days = int(days * 1.5)
                 search_count = 0
                 
-                self.logger.info("거래일 목록을 수집하는 중...")
                 while len(trading_days_list) < days and search_count < max_search_days:
                     search_count += 1
                     
@@ -76,7 +75,6 @@ class KRXReportService:
                 
                 # 2단계: 거래일 리스트를 과거순으로 정렬 (과거 -> 최신)
                 trading_days_list.sort()
-                self.logger.info(f"수집할 거래일 목록 준비 완료: {len(trading_days_list)}일")
                 
                 # 3단계: 과거부터 최신 순으로 데이터 수집 및 저장
                 trading_days_collected = 0
@@ -88,11 +86,9 @@ class KRXReportService:
                     
                     # 이미 해당 날짜 데이터가 있는지 확인
                     if self._check_data_exists(conn, date_str_sql):
-                        self.logger.info(f"데이터 이미 존재 - 날짜: {date_str_yyyymmdd} (건너뛰기)")
                         trading_days_collected += 1
                         continue
                     
-                    self.logger.info(f"데이터 수집 중 ({trading_days_collected+1}/{len(trading_days_list)}) - 날짜: {date_str_yyyymmdd}")
                     
                     # 해당 날짜의 데이터 수집 (KOSPI + KOSDAQ)
                     day_data = []
@@ -101,7 +97,6 @@ class KRXReportService:
                             market_data = self.collector.fetch_stock_data(date_str_yyyymmdd, market)
                             if market_data:
                                 day_data.extend(market_data)
-                                self.logger.debug(f"  {market} 시장: {len(market_data)}개 종목")
                         except Exception as e:
                             self.logger.warning(f"시장 데이터 수집 실패 - 날짜: {date_str_yyyymmdd}, 시장: {market}, 오류: {e}")
                             continue
@@ -111,12 +106,11 @@ class KRXReportService:
                         try:
                             inserted_count = insert_stock_data(conn, day_data)
                             total_inserted += inserted_count
-                            self.logger.info(f"  저장 완료: {inserted_count}개 레코드 ({date_str_yyyymmdd})")
                             trading_days_collected += 1
                         except Exception as e:
                             self.logger.error(f"데이터 저장 실패 - 날짜: {date_str_yyyymmdd}, 오류: {e}")
                     else:
-                        self.logger.warning(f"  수집된 데이터 없음 - 날짜: {date_str_yyyymmdd}")
+                        self.logger.warning(f"수집된 데이터 없음 - 날짜: {date_str_yyyymmdd}")
                         trading_days_collected += 1  # 거래일이지만 데이터가 없는 경우도 카운트
                 
                 self.logger.info(f"초기 데이터 수집 완료 - {trading_days_collected}개 거래일, 총 {total_inserted}개 레코드 저장")
@@ -144,9 +138,9 @@ class KRXReportService:
     def daily_data_collection(self, target_date=None):
         """일일 데이터 수집 및 처리"""
         try:
-            # 기준일 설정 (미지정시 이전 거래일)
+            # 기준일 설정 (미지정시 오늘 날짜)
             if target_date is None:
-                target_date = self.collector.get_previous_trading_day()
+                target_date = datetime.now().strftime('%Y%m%d')
             
             if isinstance(target_date, str) and len(target_date) == 8:
                 # YYYYMMDD -> YYYY-MM-DD 변환
@@ -161,25 +155,31 @@ class KRXReportService:
                 raise Exception("데이터베이스 연결 실패")
             
             try:
-                # 1. 오래된 데이터 삭제
-                deleted_count = delete_old_stock_data(conn, 365)
-                self.logger.info(f"오래된 데이터 삭제 완료: {deleted_count}개")
+                # 1. 오래된 데이터 삭제 (매일 실행) - RSI 90 계산을 위해 데이터 보존
+                delete_old_stock_data(conn, 365)
                 
-                # 2. 오늘 데이터 수집 (KOSPI + KOSDAQ)
-                today_data = []
-                for market in ['STK', 'KSQ']:
-                    market_data = self.collector.fetch_stock_data(target_date, market)
-                    today_data.extend(market_data)
+                # 2. 오늘 날짜 데이터가 이미 존재하는지 확인
+                if self._check_data_exists(conn, formatted_date):
+                    self.logger.info(f"오늘 날짜 데이터가 이미 존재합니다. 데이터 수집을 건너뛰고 다음 단계로 진행합니다.")
+                    # RSI 계산은 진행
+                    self._last_rsi_date = formatted_date
+                else:
+                    # 3. 오늘 데이터 수집 (KOSPI + KOSDAQ)
+                    today_data = []
+                    for market in ['STK', 'KSQ']:
+                        market_data = self.collector.fetch_stock_data(target_date, market)
+                        today_data.extend(market_data)
+                    
+                    if not today_data:
+                        self.logger.warning(f"수집된 데이터가 없습니다 - 날짜: {target_date}")
+                        return False
+                    
+                    # 4. 데이터베이스에 저장
+                    insert_stock_data(conn, today_data)
+                    self.logger.info(f"오늘 날짜 KRX 데이터 수집 완료 - 날짜: {target_date}")
+                    self._last_rsi_date = formatted_date
                 
-                if not today_data:
-                    self.logger.warning(f"수집된 데이터가 없습니다 - 날짜: {target_date}")
-                    return False
-                
-                # 3. 데이터베이스에 저장
-                inserted_count = insert_stock_data(conn, today_data)
-                self.logger.info(f"일일 데이터 저장 완료: {inserted_count}개")
-                
-                # 4. RSI 계산 및 저장 (KOSPI, KOSDAQ 별도 계산)
+                # 5. RSI 계산 및 저장 (KOSPI, KOSDAQ 별도 계산)
                 all_sector_rsi = []
                 for market_type, market_code in [('KOSPI', 'STK'), ('KOSDAQ', 'KSQ')]:
                     self.logger.info(f"{market_type} 시장의 섹터 RSI 계산 시작...")
@@ -188,16 +188,11 @@ class KRXReportService:
                         all_sector_rsi.extend(sector_rsi_list)
                 
                 if all_sector_rsi:
-                    rsi_inserted_count = insert_sector_rsi(conn, all_sector_rsi)
-                    self.logger.info(f"섹터 RSI 저장 완료: {rsi_inserted_count}개")
-                    self._last_rsi_date = formatted_date
-                else:
-                    self._last_rsi_date = None
+                    insert_sector_rsi(conn, all_sector_rsi)
                 
-                # 5. 업종별 대장주 추적 업데이트
+                # 6. 업종별 대장주 추적 업데이트
                 try:
-                    leader_updated_count = self.leader_tracker.update_sector_leaders(conn, formatted_date)
-                    self.logger.info(f"업종별 대장주 업데이트 완료: {leader_updated_count}개")
+                    self.leader_tracker.update_sector_leaders(conn, formatted_date)
                 except Exception as e:
                     self.logger.error(f"대장주 추적 업데이트 오류: {e}")
                     # 대장주 업데이트 실패해도 계속 진행
@@ -243,7 +238,8 @@ class KRXReportService:
                     if table_image_path:
                         table_caption = f"{target_date} {market_type} 섹터 RSI & 대장주 현황"
                         self.telegram.send_photo(table_image_path, table_caption)
-                        self.logger.info(f"텔레그램 {market_type} 테이블 리포트 전송 완료: {table_image_path}")
+                        
+                        
                     else:
                         self.logger.warning(f"{market_type} 테이블 리포트 생성 실패")
                         self._send_fallback_text_report(target_date, rsi_summary, leaders_data, market_type)
@@ -262,7 +258,6 @@ class KRXReportService:
         try:
             simple_message = f"🏢 {market_type} KRX 섹터 리포트\n📅 {target_date}\n📊 총 {rsi_summary.get('total_sectors', 0)}개 업종\n❌ 테이블 리포트 생성 실패"
             self.telegram.send_message(simple_message)
-            self.logger.info(f"{market_type} 폴백 텍스트 리포트 전송 완료")
             return True
         except Exception as e:
             self.logger.error(f"{market_type} 폴백 텍스트 리포트 전송 실패: {e}")
@@ -274,13 +269,9 @@ class KRXReportService:
         
         # 1. 데이터 수집
         if self.daily_data_collection():
-            self.logger.info("일일 데이터 수집 성공")
-            
             # 2. 리포트 생성 및 전송 (RSI가 계산된 날짜 사용)
             report_date = getattr(self, '_last_rsi_date', None)
-            if self.generate_and_send_report(report_date):
-                self.logger.info("리포트 전송 성공")
-            else:
+            if not self.generate_and_send_report(report_date):
                 self.logger.error("리포트 전송 실패")
                 self.telegram.send_message("❌ KRX 리포트 생성 실패")
         else:

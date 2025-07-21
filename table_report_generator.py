@@ -25,12 +25,23 @@ class TableReportGenerator:
         billions = market_cap // 100000000
         return f"{billions:,}억"
     
-    def format_leader_cell(self, stock_name, stock_code, market_cap, consecutive_days):
+    def format_leader_cell(self, stock_name, stock_code, market_cap, consecutive_days, prev_stock_name=None):
         """대장주 셀 정보 포맷팅 (HTML <br> 태그 사용)"""
-        cap_text = self.format_market_cap_billions(market_cap)
-        # result = f"{stock_name}({stock_code})<br>시가총액 : {cap_text}<br>연속 {consecutive_days}일"
-        result = f"{stock_name}({stock_code})"
+        result = f"{stock_name}<br>"
+        
+        # 연속일수 또는 변경 정보 추가 (색상 포함)
+        if prev_stock_name:
+            # 종목이 변경된 경우 - 파란색
+            result += f'<span style="color: #2E86C1;">NEW (이전: {prev_stock_name})</span>'
+        else:
+            # 동일 종목이 유지되는 경우 - 붉은색
+            result += f'<span style="color: #E74C3C;">({consecutive_days}일 연속)</span>'
+        
         return result
+    
+    
+    
+    
     
     def get_text_color(self, background_color):
         """배경색에 따른 적절한 텍스트 색상 반환"""
@@ -89,9 +100,9 @@ class TableReportGenerator:
                             leader_1.get('stock_name', 'Unknown'),
                             leader_1.get('stock_code', '000000'),
                             leader_1.get('market_cap', 0),
-                            leader_1.get('consecutive_days', 1)
+                            leader_1.get('consecutive_days', 1),
+                            leader_1.get('prev_stock_name')
                         )
-                    
                     # 2위 대장주
                     leader_2 = next((l for l in leaders if l.get('rank') == 2), None)
                     if leader_2:
@@ -99,7 +110,8 @@ class TableReportGenerator:
                             leader_2.get('stock_name', 'Unknown'),
                             leader_2.get('stock_code', '000000'),
                             leader_2.get('market_cap', 0),
-                            leader_2.get('consecutive_days', 1)
+                            leader_2.get('consecutive_days', 1),
+                            leader_2.get('prev_stock_name')
                         )
                 
                 # 업종명 길이 제한 (테이블 가독성을 위해)
@@ -114,7 +126,6 @@ class TableReportGenerator:
                     '2등주': leader_2_info
                 })
             
-            # RSI(14) 기준으로 내림차순 정렬 (숫자 직접 추출)
             def extract_rsi_value(rsi_str):
                 try:
                     if rsi_str == 'N/A' or rsi_str is None:
@@ -123,12 +134,8 @@ class TableReportGenerator:
                 except:
                     return 0
             
-            # table_data.sort(key=lambda x: extract_rsi_value(x['RSI(14)']), reverse=True)
-            
             df = pd.DataFrame(table_data)
-            self.logger.info(f"섹터 테이블 DataFrame 생성 완료 - {len(df)}개 업종")
             return df
-            
         except Exception as e:
             self.logger.error(f"섹터 DataFrame 생성 오류: {e}")
             return pd.DataFrame()  # 빈 DataFrame 반환
@@ -148,7 +155,6 @@ class TableReportGenerator:
             for old_file in os.listdir(self.img_dir):
                 if old_file.startswith(file_name) and old_file.endswith(file_extension):
                     os.remove(os.path.join(self.img_dir, old_file))
-                    self.logger.info(f"기존 파일 삭제: {old_file}")
         except Exception as e:
             self.logger.warning(f"기존 파일 삭제 중 오류: {e}")
         
@@ -291,8 +297,6 @@ class TableReportGenerator:
                 
             config = imgkit.config(wkhtmltoimage=self.wkhtmltoimage_path)
             imgkit.from_string(html_str, new_file_path, options=options, config=config)
-            self.logger.info(f"테이블 이미지 저장 완료: {new_file_path}")
-            
             return new_file_path, title
             
         except Exception as e:
@@ -346,12 +350,12 @@ if __name__ == "__main__":
     
     test_leaders_data = {
         '반도체': [
-            {'rank': 1, 'stock_name': '삼성전자', 'stock_code': '005930', 'market_cap': 50000000000000, 'consecutive_days': 15},
-            {'rank': 2, 'stock_name': 'SK하이닉스', 'stock_code': '000660', 'market_cap': 30000000000000, 'consecutive_days': 8}
+            {'rank': 1, 'stock_name': '삼성전자', 'stock_code': '005930', 'market_cap': 50000000000000, 'consecutive_days': 15, 'prev_stock_name': 'SK하이닉스'},
+            {'rank': 2, 'stock_name': 'SK하이닉스', 'stock_code': '000660', 'market_cap': 30000000000000, 'consecutive_days': 8, 'prev_stock_name': '삼성전자'}
         ],
         'IT서비스': [
-            {'rank': 1, 'stock_name': 'NAVER', 'stock_code': '035420', 'market_cap': 33400000000000, 'consecutive_days': 5},
-            {'rank': 2, 'stock_name': '카카오', 'stock_code': '035720', 'market_cap': 20000000000000, 'consecutive_days': 3}
+            {'rank': 1, 'stock_name': 'NAVER', 'stock_code': '035420', 'market_cap': 33400000000000, 'consecutive_days': 5, 'prev_stock_name': '카카오'},
+            {'rank': 2, 'stock_name': '카카오', 'stock_code': '035720', 'market_cap': 20000000000000, 'consecutive_days': 3, 'prev_stock_name': 'NAVER'}
         ]
     }
     
