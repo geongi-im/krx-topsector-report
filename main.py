@@ -225,7 +225,6 @@ class KRXReportService:
                 market_types = ['KOSPI', 'KOSDAQ']
                 rsi_summaries = {}
                 leaders_datas = {}
-                # 먼저 이미지 생성 시도 및 정보 저장
                 for market_type in market_types:
                     self.logger.info(f"{market_type} 리포트 생성 중...")
 
@@ -254,12 +253,24 @@ class KRXReportService:
                         image_paths.append(None)
                         captions.append(None)
 
-                # 두 시장 모두 이미지가 생성된 경우에만 send_multiple_photo 호출
                 if all(image_paths) and len(image_paths) == 2:
-                    # 첫 번째 이미지에만 캡션 추가, 두 번째는 빈 문자열
+                    # 텔레그램 전송
                     self.telegram.send_multiple_photo(image_paths, captions[0])
+                    # API 전송
+                    try:
+                        from utils.api_util import ApiUtil, ApiError
+                        api_util = ApiUtil()
+                        api_util.create_post(
+                            title=captions[0],
+                            content=f"{target_date} KRX 섹터 RSI & 대장주 분석",
+                            category="섹터분석",
+                            writer="admin",
+                            image_paths=image_paths
+                        )
+                    except ApiError as e:
+                        error_message = f"❌ API 오류 발생\n\n{e.message}"
+                        self.telegram.send_test_message(error_message)
                 else:
-                    # 실패한 시장별로 폴백 텍스트 리포트 전송
                     for idx, market_type in enumerate(market_types):
                         if not image_paths[idx]:
                             self._send_fallback_text_report(
