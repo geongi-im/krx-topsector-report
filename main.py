@@ -247,7 +247,7 @@ class KRXReportService:
 
                     if table_image_path:
                         image_paths.append(table_image_path)
-                        captions.append(f"{target_date} {market_type} 섹터 RSI & 대장주 현황")
+                        captions.append(f"{target_date} 섹터 RSI & 대장주 분석")
                     else:
                         self.logger.warning(f"{market_type} 테이블 리포트 생성 실패")
                         image_paths.append(None)

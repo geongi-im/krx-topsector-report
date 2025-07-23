@@ -59,7 +59,7 @@ class ApiUtil:
 
     def create_post(self, title: str, content: str, category: str, writer: str, image_paths: Optional[List[str]] = None):
         """게시글 생성 API 호출"""
-        url = f"{self.base_url}/board-content"
+        url = f"{self.base_url}/board-research"
         
         try:
             if image_paths:
