@@ -212,43 +212,67 @@ class KRXReportService:
             if target_date is None:
                 prev_trading_day = self.collector.get_previous_trading_day()
                 target_date = f"{prev_trading_day[:4]}-{prev_trading_day[4:6]}-{prev_trading_day[6:8]}"
-            
+
             self.logger.info(f"테이블 리포트 생성 시작 - 기준일: {target_date}")
-            
+
             conn = get_db_connection()
             if not conn:
                 raise Exception("데이터베이스 연결 실패")
-            
+
             try:
-                for market_type in ['KOSPI', 'KOSDAQ']:
+                image_paths = []
+                captions = []
+                market_types = ['KOSPI', 'KOSDAQ']
+                rsi_summaries = {}
+                leaders_datas = {}
+                # 먼저 이미지 생성 시도 및 정보 저장
+                for market_type in market_types:
                     self.logger.info(f"{market_type} 리포트 생성 중...")
-                    
+
                     rsi_summary = self.rsi_calculator.get_rsi_summary(conn, target_date, market_type)
-                    
+                    rsi_summaries[market_type] = rsi_summary
+
                     if not rsi_summary or not rsi_summary.get('total_sectors'):
                         self.logger.warning(f"{market_type} RSI 데이터가 없어 리포트를 생성할 수 없습니다.")
+                        leaders_datas[market_type] = None
+                        image_paths.append(None)
+                        captions.append(None)
                         continue
 
                     leaders_data = self.leader_tracker.get_sector_leaders_with_streak(conn, target_date, market_type)
-                    
+                    leaders_datas[market_type] = leaders_data
+
                     table_image_path = self.table_generator.create_sector_table_report(
                         rsi_summary, leaders_data, target_date, market_type
                     )
-                    
+
                     if table_image_path:
-                        table_caption = f"{target_date} {market_type} 섹터 RSI & 대장주 현황"
-                        self.telegram.send_photo(table_image_path, table_caption)
-                        
-                        
+                        image_paths.append(table_image_path)
+                        captions.append(f"{target_date} {market_type} 섹터 RSI & 대장주 현황")
                     else:
                         self.logger.warning(f"{market_type} 테이블 리포트 생성 실패")
-                        self._send_fallback_text_report(target_date, rsi_summary, leaders_data, market_type)
-                
+                        image_paths.append(None)
+                        captions.append(None)
+
+                # 두 시장 모두 이미지가 생성된 경우에만 send_multiple_photo 호출
+                if all(image_paths) and len(image_paths) == 2:
+                    # 첫 번째 이미지에만 캡션 추가, 두 번째는 빈 문자열
+                    self.telegram.send_multiple_photo(image_paths, captions[0])
+                else:
+                    # 실패한 시장별로 폴백 텍스트 리포트 전송
+                    for idx, market_type in enumerate(market_types):
+                        if not image_paths[idx]:
+                            self._send_fallback_text_report(
+                                target_date,
+                                rsi_summaries.get(market_type, {}),
+                                leaders_datas.get(market_type, {}),
+                                market_type
+                            )
                 return True
-                
+
             finally:
                 conn.close()
-                
+
         except Exception as e:
             self.logger.error(f"테이블 리포트 생성 오류: {e}")
             return False
