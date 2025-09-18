@@ -266,7 +266,7 @@ class KRXReportService:
                             category="섹터분석",
                             writer="admin",
                             image_paths=image_paths,
-                            thumbnail_image_path=os.path.abspath("thumbnail/thumbnail_sector_top.png")
+                            thumbnail_image_path=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'thumbnail', 'thumbnail_sector_top.png')
                         )
                     except ApiError as e:
                         error_message = f"❌ API 오류 발생\n\n{e.message}"
