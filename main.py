@@ -265,7 +265,8 @@ class KRXReportService:
                             content=f"{target_date} KRX 섹터 RSI & 대장주 분석",
                             category="섹터분석",
                             writer="admin",
-                            image_paths=image_paths
+                            image_paths=image_paths,
+                            thumbnail_image_path=os.path.abspath("thumbnail/thumbnail_sector_top.png")
                         )
                     except ApiError as e:
                         error_message = f"❌ API 오류 발생\n\n{e.message}"

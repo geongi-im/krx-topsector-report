@@ -1,7 +1,7 @@
 CLAUDE.md
 settings.local.json
 source.png
-*.png
+img/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
