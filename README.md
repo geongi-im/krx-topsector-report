@@ -178,6 +178,9 @@ TELEGRAM_BOT_TOKEN=your_bot_token_here
 TELEGRAM_CHAT_ID=your_chat_id_here
 TELEGRAM_CHAT_TEST_ID=your_test_chat_id_here
 
+# BASE_URL
+BASE_URL=http://example.com
+
 # 데이터베이스 설정
 DB_HOST=localhost
 DB_USER=your_db_user
