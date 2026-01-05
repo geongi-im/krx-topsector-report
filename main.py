@@ -269,7 +269,7 @@ class KRXReportService:
                             thumbnail_image_path=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'thumbnail', 'thumbnail_sector_top.png')
                         )
                     except ApiError as e:
-                        error_message = f"❌ API 오류 발생\n\n{e.message}"
+                        error_message = f"❌ [krx-topsector-report] API 오류 발생\n\n{e.message}"
                         self.telegram.send_test_message(error_message)
                 else:
                     for idx, market_type in enumerate(market_types):
@@ -292,8 +292,8 @@ class KRXReportService:
     def _send_fallback_text_report(self, target_date, rsi_summary, leaders_data, market_type):
         """이미지 리포트 실패시 폴백 텍스트 리포트 전송"""
         try:
-            simple_message = f"🏢 {market_type} KRX 섹터 리포트\n📅 {target_date}\n📊 총 {rsi_summary.get('total_sectors', 0)}개 업종\n❌ 테이블 리포트 생성 실패"
-            self.telegram.send_message(simple_message)
+            simple_message = f"🏢 [krx-topsector-report] {market_type} KRX 섹터 리포트\n📅 {target_date}\n📊 총 {rsi_summary.get('total_sectors', 0)}개 업종\n❌ 테이블 리포트 생성 실패"
+            self.telegram.send_test_message(simple_message)
             return True
         except Exception as e:
             self.logger.error(f"{market_type} 폴백 텍스트 리포트 전송 실패: {e}")
@@ -309,10 +309,10 @@ class KRXReportService:
             report_date = getattr(self, '_last_rsi_date', None)
             if not self.generate_and_send_report(report_date):
                 self.logger.error("리포트 전송 실패")
-                self.telegram.send_message("❌ KRX 리포트 생성 실패")
+                self.telegram.send_test_message("❌ [krx-topsector-report] KRX 리포트 생성 실패")
         else:
             self.logger.error("일일 데이터 수집 실패")
-            self.telegram.send_message("❌ KRX 데이터 수집 실패")
+            self.telegram.send_test_message("❌ [krx-topsector-report] KRX 데이터 수집 실패")
         
         self.logger.info("=== 일일 작업 완료 ===")
 
