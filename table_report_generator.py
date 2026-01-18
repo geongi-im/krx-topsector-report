@@ -5,7 +5,6 @@ from datetime import datetime
 from dotenv import load_dotenv
 from utils.telegram_util import TelegramUtil
 from utils.logger_util import LoggerUtil
-
 load_dotenv()
 
 class TableReportGenerator:
@@ -38,11 +37,7 @@ class TableReportGenerator:
             result += f'<span style="color: #E74C3C;">({consecutive_days}일 연속)</span>'
         
         return result
-    
-    
-    
-    
-    
+
     def get_text_color(self, background_color):
         """배경색에 따른 적절한 텍스트 색상 반환"""
         # 어두운 배경색에는 흰색 텍스트, 밝은 배경색에는 검은색 텍스트
@@ -57,6 +52,13 @@ class TableReportGenerator:
         if rsi_value is None:
             return 'N/A'
         return f'{rsi_value:.2f}'
+
+    def split_dataframe(self, df, rows_per_page=10):
+        """DataFrame을 지정된 행 수로 분할"""
+        chunks = []
+        for i in range(0, len(df), rows_per_page):
+            chunks.append(df.iloc[i:i + rows_per_page])
+        return chunks
     
     def create_sector_dataframe(self, rsi_data, leaders_data, market_type):
         """섹터별 RSI와 대장주 정보를 DataFrame으로 변환"""
@@ -140,23 +142,28 @@ class TableReportGenerator:
             self.logger.error(f"섹터 DataFrame 생성 오류: {e}")
             return pd.DataFrame()  # 빈 DataFrame 반환
     
-    def save_df_as_image(self, df, title, file_name='sector_table.png'):
-        """DataFrame을 이미지로 저장하고 파일 경로와 제목 반환 (example.py 스타일)"""
+    def save_df_as_image(self, df, title, file_name='sector_table.png', page_num=None, total_pages=None):
+        """DataFrame을 이미지로 저장하고 파일 경로와 제목 반환 (example.py 스타일)
+
+        Args:
+            df: 이미지로 변환할 DataFrame
+            title: 이미지 제목
+            file_name: 저장할 파일명
+            page_num: 현재 페이지 번호 (1부터 시작, None이면 페이지 정보 미표시)
+            total_pages: 전체 페이지 수 (None이면 페이지 정보 미표시)
+        """
         if df is None or df.empty:
             self.logger.warning("빈 DataFrame으로 이미지 생성 불가")
             return None, None
 
-        file_name, file_extension = os.path.splitext(file_name)
+        file_name_base, file_extension = os.path.splitext(file_name)
         current_date = datetime.now().strftime('%Y%m%d')
-        new_file_path = os.path.join(self.img_dir, f"{file_name}_{current_date}{file_extension}")
-        
-        # 이전 파일 삭제
-        try:
-            for old_file in os.listdir(self.img_dir):
-                if old_file.startswith(file_name) and old_file.endswith(file_extension):
-                    os.remove(os.path.join(self.img_dir, old_file))
-        except Exception as e:
-            self.logger.warning(f"기존 파일 삭제 중 오류: {e}")
+
+        # 페이지 번호가 있으면 파일명에 추가
+        if page_num is not None:
+            new_file_path = os.path.join(self.img_dir, f"{file_name_base}_{current_date}_p{page_num}{file_extension}")
+        else:
+            new_file_path = os.path.join(self.img_dir, f"{file_name_base}_{current_date}{file_extension}")
         
         # 기본 HTML 테이블 생성
         html_table = df.to_html(index=False, classes='styled-table', escape=False, table_id='styled-table')
@@ -212,6 +219,11 @@ class TableReportGenerator:
         
         # tbody 내의 모든 행에 적용
         html_table = re.sub(r'<tr>\s*(<td>.*?</td>\s*)+</tr>', replace_rsi_cells, html_table, flags=re.DOTALL)
+
+        # 페이지 정보가 있으면 제목에 추가
+        display_title = title
+        if page_num is not None and total_pages is not None:
+            display_title = f"{title} ({page_num}/{total_pages})"
 
         # example.py와 동일한 HTML 스타일
         html_str = f'''
@@ -274,7 +286,7 @@ class TableReportGenerator:
             </style>
         </head>
         <body>
-            <div class="caption">{title}</div>
+            <div class="caption">{display_title}</div>
             {html_table}
             <div class="source">※ 출처 : MQ(Money Quotient)</div>
         </body>
@@ -304,32 +316,70 @@ class TableReportGenerator:
             self.logger.error(error_message)
             return None, None
     
-    def create_sector_table_report(self, rsi_data, leaders_data, trade_date, market_type):
-        """섹터 테이블 리포트를 생성하고 이미지 경로 반환"""
+    def create_sector_table_report(self, rsi_data, leaders_data, trade_date, market_type, rows_per_page=10):
+        """섹터 테이블 리포트를 생성하고 이미지 경로 리스트 반환
+
+        Args:
+            rsi_data: RSI 데이터
+            leaders_data: 대장주 데이터
+            trade_date: 거래일
+            market_type: 시장 유형 (KOSPI/KOSDAQ)
+            rows_per_page: 페이지당 행 수 (기본값: 10)
+
+        Returns:
+            list[str]: 생성된 이미지 경로 리스트 (실패 시 빈 리스트)
+        """
         try:
             self.logger.info(f"{market_type} 섹터 테이블 리포트 생성 시작 - 기준일: {trade_date}")
-            
+
             df = self.create_sector_dataframe(rsi_data, leaders_data, market_type)
-            
+
             if df.empty:
                 self.logger.warning(f"{market_type}에서 생성할 데이터가 없어 테이블 리포트 생성 중단")
-                return None
-            
+                return []
+
+            # DataFrame을 페이지별로 분할
+            df_chunks = self.split_dataframe(df, rows_per_page)
+            total_pages = len(df_chunks)
+
             title = f"{trade_date} {market_type} 섹터 RSI & 대장주 현황"
-            file_name = f"sector_table_{market_type.lower()}_{datetime.now().strftime('%Y%m%d')}.png"
-            
-            img_path, caption = self.save_df_as_image(df, title, file_name)
-            
-            if img_path:
-                self.logger.info(f"{market_type} 섹터 테이블 리포트 생성 완료: {img_path}")
-                return img_path
+            file_name_base = f"sector_table_{market_type.lower()}"
+            file_extension = ".png"
+
+            # 이미지 생성 전 기존 파일 삭제 (한 번만 실행)
+            try:
+                for old_file in os.listdir(self.img_dir):
+                    if old_file.startswith(file_name_base) and old_file.endswith(file_extension):
+                        os.remove(os.path.join(self.img_dir, old_file))
+            except Exception as e:
+                self.logger.warning(f"기존 파일 삭제 중 오류: {e}")
+
+            image_paths = []
+            for page_num, chunk_df in enumerate(df_chunks, start=1):
+                img_path, caption = self.save_df_as_image(
+                    chunk_df,
+                    title,
+                    f"{file_name_base}{file_extension}",
+                    page_num=page_num,
+                    total_pages=total_pages
+                )
+
+                if img_path:
+                    image_paths.append(img_path)
+                    self.logger.info(f"{market_type} 테이블 리포트 ({page_num}/{total_pages}) 생성 완료: {img_path}")
+                else:
+                    self.logger.error(f"{market_type} 테이블 이미지 ({page_num}/{total_pages}) 생성 실패")
+
+            if image_paths:
+                self.logger.info(f"{market_type} 섹터 테이블 리포트 총 {len(image_paths)}개 이미지 생성 완료")
             else:
-                self.logger.error(f"{market_type} 테이블 이미지 생성 실패")
-                return None
-                
+                self.logger.error(f"{market_type} 테이블 리포트 이미지 생성 실패")
+
+            return image_paths
+
         except Exception as e:
             self.logger.error(f"{market_type} 섹터 테이블 리포트 생성 오류: {e}")
-            return None
+            return []
 
 # 테스트용 실행 코드
 if __name__ == "__main__":

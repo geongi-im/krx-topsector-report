@@ -35,12 +35,12 @@ KRX Top Sector Report는 한국거래소의 모든 상장 종목을 섹터별로
 
 ```
 krx-topsector-report/
-├── main.py                          # 메인 실행 파일
-├── data_collector.py                # KRX 데이터 수집기
-├── rsi_calculator.py                # RSI 지표 계산기
-├── sector_leader_tracker.py         # 섹터 대장주 추적기
+├── main.py                          # 메인 실행 파일 (KRXReportService)
+├── krx_service.py                   # KRX 핵심 서비스 모듈
+│   ├── KRXDataCollector             # KRX 데이터 수집기
+│   ├── RSICalculator                # RSI 지표 계산기
+│   └── SectorLeaderTracker          # 섹터 대장주 추적기
 ├── table_report_generator.py        # 테이블 리포트 생성기 (HTML to Image)
-├── recalculate_consecutive_days.py  # 연속일수 재계산 유틸리티
 ├── requirements.txt                 # 의존성 패키지 목록
 ├── .env                             # 환경변수 설정
 ├── CLAUDE.md                        # Claude Code용 프로젝트 설명
@@ -234,28 +234,11 @@ python main.py --init
 6. 텔레그램으로 리포트 전송
 7. 외부 API로 게시글 자동 등록 (설정된 경우)
 
-### 유틸리티 스크립트
-
-```bash
-# 대장주 연속 유지 일수를 과거 데이터 기반으로 재계산
-python recalculate_consecutive_days.py
-```
-
-이 스크립트는 과거 거래일 데이터를 분석하여 각 섹터의 대장주가 실제로 몇 일 연속으로 해당 순위를 유지했는지 계산합니다.
-
 ### 개별 모듈 테스트
 
-각 모듈은 독립적으로 실행 가능합니다:
-
 ```bash
-# 데이터 수집기 테스트
-python data_collector.py
-
-# RSI 계산기 테스트
-python rsi_calculator.py
-
-# 대장주 추적기 테스트
-python sector_leader_tracker.py
+# KRX 서비스 모듈 테스트 (데이터 수집기, RSI 계산기, 대장주 추적기)
+python krx_service.py
 
 # 리포트 생성기 테스트
 python table_report_generator.py

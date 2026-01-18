@@ -5,9 +5,7 @@ from datetime import datetime, timedelta
 # 프로젝트 루트 디렉토리를 Python 경로에 추가
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from data_collector import KRXDataCollector
-from rsi_calculator import RSICalculator
-from sector_leader_tracker import SectorLeaderTracker
+from krx_service import KRXDataCollector, RSICalculator, SectorLeaderTracker
 from table_report_generator import TableReportGenerator
 from utils.db_manager import (
     get_db_connection, 
@@ -114,11 +112,36 @@ class KRXReportService:
                         trading_days_collected += 1  # 거래일이지만 데이터가 없는 경우도 카운트
                 
                 self.logger.info(f"초기 데이터 수집 완료 - {trading_days_collected}개 거래일, 총 {total_inserted}개 레코드 저장")
+
+                # 4단계: 최신 거래일 기준으로 RSI 계산 및 대장주 업데이트
+                if trading_days_list:
+                    latest_date = trading_days_list[-1].strftime('%Y-%m-%d')
+                    self.logger.info(f"RSI 계산 및 대장주 업데이트 시작 - 기준일: {latest_date}")
+
+                    # RSI 계산 및 저장
+                    all_sector_rsi = []
+                    for market_type in ['KOSPI', 'KOSDAQ']:
+                        sector_rsi_list = self.rsi_calculator.calculate_sector_rsi_batch(conn, latest_date, market_type)
+                        if sector_rsi_list:
+                            all_sector_rsi.extend(sector_rsi_list)
+
+                    if all_sector_rsi:
+                        insert_sector_rsi(conn, all_sector_rsi)
+                        self.logger.info(f"RSI 계산 완료 - {len(all_sector_rsi)}개 업종")
+
+                    # 대장주 업데이트
+                    self.leader_tracker.update_sector_leaders(conn, latest_date)
+
+                    # 연속일수 재계산 (과거 데이터 기반)
+                    self.logger.info("연속일수 재계산 시작...")
+                    updated_count = self.leader_tracker.recalculate_all_consecutive_days(conn, latest_date)
+                    self.logger.info(f"연속일수 재계산 완료 - {updated_count}개 레코드 업데이트")
+
                 return trading_days_collected > 0
-                
+
             finally:
                 conn.close()
-                
+
         except Exception as e:
             self.logger.error(f"초기 데이터 수집 오류: {e}")
             return False
@@ -220,11 +243,11 @@ class KRXReportService:
                 raise Exception("데이터베이스 연결 실패")
 
             try:
-                image_paths = []
-                captions = []
                 market_types = ['KOSPI', 'KOSDAQ']
                 rsi_summaries = {}
                 leaders_datas = {}
+                all_image_paths = {}  # 시장별 이미지 경로 리스트
+
                 for market_type in market_types:
                     self.logger.info(f"{market_type} 리포트 생성 중...")
 
@@ -234,53 +257,57 @@ class KRXReportService:
                     if not rsi_summary or not rsi_summary.get('total_sectors'):
                         self.logger.warning(f"{market_type} RSI 데이터가 없어 리포트를 생성할 수 없습니다.")
                         leaders_datas[market_type] = None
-                        image_paths.append(None)
-                        captions.append(None)
+                        all_image_paths[market_type] = []
                         continue
 
                     leaders_data = self.leader_tracker.get_sector_leaders_with_streak(conn, target_date, market_type)
                     leaders_datas[market_type] = leaders_data
 
-                    table_image_path = self.table_generator.create_sector_table_report(
+                    # create_sector_table_report가 이미지 경로 리스트를 반환
+                    table_image_paths = self.table_generator.create_sector_table_report(
                         rsi_summary, leaders_data, target_date, market_type
                     )
 
-                    if table_image_path:
-                        image_paths.append(table_image_path)
-                        captions.append(f"{target_date} 섹터 RSI & 대장주 분석")
-                    else:
-                        self.logger.warning(f"{market_type} 테이블 리포트 생성 실패")
-                        image_paths.append(None)
-                        captions.append(None)
+                    all_image_paths[market_type] = table_image_paths if table_image_paths else []
 
-                if all(image_paths) and len(image_paths) == 2:
-                    # 텔레그램 전송
-                    self.telegram.send_multiple_photo(image_paths, captions[0])
-                    # API 전송
+                # 시장별로 별도 텔레그램 전송
+                success_count = 0
+                combined_image_paths = []  # API 전송용 전체 이미지 경로
+
+                for market_type in market_types:
+                    image_paths = all_image_paths.get(market_type, [])
+                    if image_paths:
+                        caption = f"{target_date} {market_type} 섹터 RSI & 대장주 분석"
+                        self.telegram.send_multiple_photo(image_paths, caption)
+                        combined_image_paths.extend(image_paths)
+                        success_count += 1
+                        self.logger.info(f"{market_type} 텔레그램 전송 완료 ({len(image_paths)}개 이미지)")
+                    else:
+                        self._send_fallback_text_report(
+                            target_date,
+                            rsi_summaries.get(market_type, {}),
+                            leaders_datas.get(market_type, {}),
+                            market_type
+                        )
+
+                # 모든 시장 이미지를 API로 전송
+                if combined_image_paths:
                     try:
                         from utils.api_util import ApiUtil, ApiError
                         api_util = ApiUtil()
                         api_util.create_post(
-                            title=captions[0],
+                            title=f"{target_date} 섹터 RSI & 대장주 분석",
                             content=f"{target_date} KRX 섹터 RSI & 대장주 분석",
                             category="섹터분석",
                             writer="admin",
-                            image_paths=image_paths,
+                            image_paths=combined_image_paths,
                             thumbnail_image_path=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'thumbnail', 'thumbnail_sector_top.png')
                         )
                     except ApiError as e:
                         error_message = f"❌ [krx-topsector-report] API 오류 발생\n\n{e.message}"
                         self.telegram.send_test_message(error_message)
-                else:
-                    for idx, market_type in enumerate(market_types):
-                        if not image_paths[idx]:
-                            self._send_fallback_text_report(
-                                target_date,
-                                rsi_summaries.get(market_type, {}),
-                                leaders_datas.get(market_type, {}),
-                                market_type
-                            )
-                return True
+
+                return success_count > 0
 
             finally:
                 conn.close()
@@ -304,7 +331,7 @@ class KRXReportService:
         self.logger.info("=== 일일 작업 시작 ===")
         
         # 1. 데이터 수집
-        if self.daily_data_collection():
+        if self.daily_data_collection('20260116'):
             # 2. 리포트 생성 및 전송 (RSI가 계산된 날짜 사용)
             report_date = getattr(self, '_last_rsi_date', None)
             if not self.generate_and_send_report(report_date):
