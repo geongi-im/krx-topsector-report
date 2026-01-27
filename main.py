@@ -331,7 +331,7 @@ class KRXReportService:
         self.logger.info("=== 일일 작업 시작 ===")
         
         # 1. 데이터 수집
-        if self.daily_data_collection('20260116'):
+        if self.daily_data_collection():
             # 2. 리포트 생성 및 전송 (RSI가 계산된 날짜 사용)
             report_date = getattr(self, '_last_rsi_date', None)
             if not self.generate_and_send_report(report_date):
