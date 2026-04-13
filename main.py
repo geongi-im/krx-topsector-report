@@ -164,13 +164,18 @@ class KRXReportService:
             # 기준일 설정 (미지정시 오늘 날짜)
             if target_date is None:
                 target_date = datetime.now().strftime('%Y%m%d')
-            
+
             if isinstance(target_date, str) and len(target_date) == 8:
                 # YYYYMMDD -> YYYY-MM-DD 변환
                 formatted_date = f"{target_date[:4]}-{target_date[4:6]}-{target_date[6:8]}"
             else:
                 formatted_date = target_date
-            
+
+            # 거래일 여부 확인 (주말/공휴일이면 건너뜀)
+            if not self.collector.is_trading_day(target_date):
+                self.logger.info(f"오늘({target_date})은 거래일이 아닙니다. 데이터 수집을 건너뜁니다.")
+                return False
+
             self.logger.info(f"일일 데이터 수집 시작 - 기준일: {target_date}")
             
             conn = get_db_connection()
@@ -329,7 +334,15 @@ class KRXReportService:
     def run_daily_job(self):
         """일일 작업 실행"""
         self.logger.info("=== 일일 작업 시작 ===")
-        
+
+        today = datetime.now().strftime('%Y%m%d')
+
+        # 거래일이 아니면 작업 건너뜀
+        if not self.collector.is_trading_day(today):
+            self.logger.info(f"오늘({today})은 거래일이 아닙니다. 일일 작업을 건너뜁니다.")
+            self.logger.info("=== 일일 작업 완료 ===")
+            return
+
         # 1. 데이터 수집
         if self.daily_data_collection():
             # 2. 리포트 생성 및 전송 (RSI가 계산된 날짜 사용)
@@ -340,7 +353,7 @@ class KRXReportService:
         else:
             self.logger.error("일일 데이터 수집 실패")
             self.telegram.send_test_message("❌ [krx-topsector-report] KRX 데이터 수집 실패")
-        
+
         self.logger.info("=== 일일 작업 완료 ===")
 
 def main():
