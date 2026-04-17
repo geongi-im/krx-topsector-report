@@ -5,6 +5,11 @@ from datetime import datetime, timedelta
 # 프로젝트 루트 디렉토리를 Python 경로에 추가
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
+from utils.logger_util import LoggerUtil
+from utils.telegram_util import TelegramUtil
+
+# krx_session_util 은 reports.* 보다 먼저 import — pykrx 내장 자동 로그인(CD010) 억제
+from utils.krx_session_util import install_krx_session, KrxSessionError
 from krx_service import KRXDataCollector, RSICalculator, SectorLeaderTracker
 from table_report_generator import TableReportGenerator
 from utils.db_manager import (
@@ -15,8 +20,6 @@ from utils.db_manager import (
     insert_sector_rsi,
     get_latest_sector_rsi
 )
-from utils.logger_util import LoggerUtil
-from utils.telegram_util import TelegramUtil
 
 class KRXReportService:
     def __init__(self):
@@ -335,6 +338,15 @@ class KRXReportService:
         """일일 작업 실행"""
         self.logger.info("=== 일일 작업 시작 ===")
 
+        # KRX 로그인 세션 주입 (pykrx 내장 계정이 CD010 으로 실패하므로 필수)
+        try:
+            install_krx_session()
+            self.logger.info("KRX 로그인 세션 주입 완료")
+        except KrxSessionError as e:
+            self.logger.error(f"KRX 로그인 실패: {e}")
+            self.telegram.send_test_message(f"❌ KRX 로그인 실패\n\n{e}")
+            sys.exit(1)
+
         today = datetime.now().strftime('%Y%m%d')
 
         # 거래일이 아니면 작업 건너뜀
@@ -364,7 +376,7 @@ def main():
     if not service.initialize_database():
         print("데이터베이스 초기화 실패")
         return
-    
+
     # 초기 데이터 수집 여부 확인
     if len(sys.argv) > 1 and sys.argv[1] == "--init":
         print("초기 데이터 수집을 시작합니다...")
