@@ -1,17 +1,17 @@
-"""KRX Data Marketplace 로그인 세션을 pykrx 에 주입하는 유틸.
+"""KRX Data Marketplace 계정을 pykrx 에 연결하는 유틸.
 
-pykrx (0.1.x) 의 pykrx.website.comm.webio 는 모듈 로드 시점에 내장된 계정으로
-자동 로그인을 시도한다. 해당 계정이 실패(CD010 등)하면 모든 pykrx API 호출이
-빈 응답/JSONDecodeError 로 끝난다. 또한 webio 의 Get/Post 클래스는 모듈 전역
-`_session` (requests.Session) 을 사용하므로, 세션을 교체하려면 이 변수를
-직접 덮어써야 한다.
+pykrx 1.2.8 은 환경변수 KRX_ID / KRX_PW 를 읽어 스스로 로그인하고, 세션이
+만료되면 자동으로 재로그인한다 (pykrx.website.comm.auth). 데이터 조회
+엔드포인트도 https 로 바뀌어 있어, 로그인 세션 쿠키(JSESSIONID, Secure)가
+정상적으로 실려 나간다.
 
-이 모듈은 다음을 수행한다:
-1. pykrx webio 가 import 되기 전에 requests.Session.get/post 를 no-op 으로 일시
-   교체해, 내장된 bluevisor 자동 로그인의 네트워크 호출 + "[KRX] 로그인 실패:
-   CD010" stdout 출력을 모두 제거한다 (import 완료 후 원상복구).
-2. install_krx_session() 으로 주어진 계정 로그인 후, pykrx webio._session 을
-   교체한다. main.py 초기화 시점에 한 번만 호출.
+이 프로젝트의 .env 는 계정을 KRX_LOGIN_ID / KRX_LOGIN_PASSWORD 라는 이름으로
+두므로, pykrx 가 읽는 이름으로 옮겨준 뒤 pykrx 를 import 해야 한다. import
+시점에 로그인이 수행되기 때문에 순서가 중요하다. main.py 에서 reports.* 보다
+먼저 이 모듈을 import 하는 이유다.
+
+pykrx 는 로그인 진행 상황을 stdout 으로 출력하므로, import 시점 출력은
+가로채서 보관해 두었다가 실패했을 때 에러 메시지에 붙여준다.
 """
 
 from __future__ import annotations
@@ -21,128 +21,74 @@ import io
 import os
 from typing import Optional
 
-import requests
+from dotenv import load_dotenv
+
+# pykrx import 이전에 .env 를 읽어 계정을 환경변수로 올린다.
+load_dotenv()
 
 
-class _DummyResponse:
-    """pykrx 내장 login_krx() 가 호출하는 session.get/post 를 받아줄 더미 응답."""
-
-    status_code = 200
-    text = ""
-    cookies: dict = {}
-
-    def json(self) -> dict:
-        return {"_error_code": "SKIPPED"}
-
-
-def _silence_pykrx_autologin() -> None:
-    """pykrx.website.comm.webio 임포트 순간의 자동 로그인을 네트워크/출력 없이 통과.
-
-    webio 모듈 최상단의 login_krx() 는 requests.Session 인스턴스의 get/post 를
-    통해 네트워크를 사용한다. import 직전에 Session 클래스 레벨의 get/post 를
-    no-op 으로 교체 → import 후 원상복구 하는 방식으로 차단한다.
-    """
-
-    def _noop(self, *args, **kwargs):  # type: ignore[no-untyped-def]
-        return _DummyResponse()
-
-    orig_get = requests.Session.get
-    orig_post = requests.Session.post
-    requests.Session.get = _noop  # type: ignore[assignment]
-    requests.Session.post = _noop  # type: ignore[assignment]
-    try:
-        with contextlib.redirect_stdout(io.StringIO()):
-            import pykrx.website.comm.webio  # noqa: F401
-    finally:
-        requests.Session.get = orig_get
-        requests.Session.post = orig_post
+def _export_credentials() -> tuple[Optional[str], Optional[str]]:
+    """.env 의 KRX_LOGIN_* 값을 pykrx 가 읽는 KRX_ID / KRX_PW 로 옮긴다."""
+    login_id = os.getenv("KRX_LOGIN_ID") or os.getenv("KRX_ID")
+    password = os.getenv("KRX_LOGIN_PASSWORD") or os.getenv("KRX_PW")
+    if login_id:
+        os.environ["KRX_ID"] = login_id
+    if password:
+        os.environ["KRX_PW"] = password
+    return login_id, password
 
 
-_silence_pykrx_autologin()
+_export_credentials()
 
-from pykrx.website.comm import webio as _webio
-
-_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-)
-_LOGIN_PAGE_URL = "https://data.krx.co.kr/contents/MDC/COMS/client/MDCCOMS001.cmd"
-_LOGIN_IFRAME_URL = "https://data.krx.co.kr/contents/MDC/COMS/client/view/login.jsp?site=mdc"
-_LOGIN_POST_URL = "https://data.krx.co.kr/contents/MDC/COMS/client/MDCCOMS001D1.cmd"
-
-_installed = False
+# import 시점에 pykrx 가 로그인을 시도한다. 출력은 붙잡아 둔다.
+_import_log = io.StringIO()
+with contextlib.redirect_stdout(_import_log):
+    from pykrx.website.comm import auth as _auth
 
 
 class KrxSessionError(RuntimeError):
-    """KRX 로그인/세션 주입 실패"""
+    """KRX 로그인/세션 준비 실패"""
 
 
 def install_krx_session(
     login_id: Optional[str] = None,
     password: Optional[str] = None,
     force: bool = False,
-) -> requests.Session:
-    """KRX 에 로그인한 세션을 pykrx webio 에 주입.
+):
+    """pykrx 가 사용할 KRX 로그인 세션을 확보한다.
 
     Args:
         login_id: KRX Data Marketplace 계정 ID. 생략 시 KRX_LOGIN_ID 환경변수.
         password: 계정 비밀번호. 생략 시 KRX_LOGIN_PASSWORD 환경변수.
-        force: True 이면 이미 주입된 경우에도 다시 로그인.
+        force: True 이면 이미 로그인된 세션이 있어도 다시 로그인.
 
     Returns:
-        로그인 완료된 requests.Session (이미 pykrx 에 주입됨)
+        pykrx 의 KRXSession (로그인 완료 상태)
 
     Raises:
         KrxSessionError: 자격 증명 누락 또는 KRX 로그인 실패 시.
     """
-    global _installed
-    if _installed and not force:
-        return _webio._session  # pyright: ignore[reportPrivateUsage, reportReturnType]
+    if login_id:
+        os.environ["KRX_ID"] = login_id
+    if password:
+        os.environ["KRX_PW"] = password
 
-    login_id = login_id or os.getenv("KRX_LOGIN_ID")
-    password = password or os.getenv("KRX_LOGIN_PASSWORD")
-    if not login_id or not password:
+    env_id, env_pw = _export_credentials()
+    if not env_id or not env_pw:
         raise KrxSessionError(
             "KRX_LOGIN_ID / KRX_LOGIN_PASSWORD 환경변수가 필요합니다."
         )
 
-    session = requests.Session()
+    log = io.StringIO()
+    with contextlib.redirect_stdout(log):
+        session = _auth.get_auth_session()
+        if session is not None and force:
+            if not session.refresh(env_id, env_pw):
+                session = None
 
-    session.get(_LOGIN_PAGE_URL, headers={"User-Agent": _USER_AGENT}, timeout=15)
-    session.get(
-        _LOGIN_IFRAME_URL,
-        headers={"User-Agent": _USER_AGENT, "Referer": _LOGIN_PAGE_URL},
-        timeout=15,
-    )
+    if session is None or not session.is_authenticated:
+        detail = (_import_log.getvalue() + log.getvalue()).strip()
+        detail = detail.replace("\n", " / ") or "원인 불명"
+        raise KrxSessionError(f"KRX 로그인 실패: {detail}")
 
-    payload = {
-        "mbrNm": "",
-        "telNo": "",
-        "di": "",
-        "certType": "",
-        "mbrId": login_id,
-        "pw": password,
-    }
-    headers = {
-        "User-Agent": _USER_AGENT,
-        "Referer": _LOGIN_PAGE_URL,
-        "X-Requested-With": "XMLHttpRequest",
-    }
-
-    resp = session.post(_LOGIN_POST_URL, data=payload, headers=headers, timeout=15)
-    data = resp.json()
-    code = str(data.get("_error_code") or "")
-
-    if code == "CD011":
-        payload["skipDup"] = "Y"
-        resp = session.post(_LOGIN_POST_URL, data=payload, headers=headers, timeout=15)
-        data = resp.json()
-        code = str(data.get("_error_code") or "")
-
-    if code != "CD001":
-        msg = str(data.get("_error_message") or "unknown").strip()
-        raise KrxSessionError(f"KRX 로그인 실패: {code} {msg}".strip())
-
-    _webio._session = session  # pyright: ignore[reportPrivateUsage]
-    _installed = True
     return session

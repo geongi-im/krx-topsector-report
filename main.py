@@ -8,7 +8,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from utils.logger_util import LoggerUtil
 from utils.telegram_util import TelegramUtil
 
-# krx_session_util 은 reports.* 보다 먼저 import — pykrx 내장 자동 로그인(CD010) 억제
+# krx_session_util 은 krx_service 보다 먼저 import - .env 계정을 pykrx 에 넘긴 뒤 로그인
 from utils.krx_session_util import install_krx_session, KrxSessionError
 from krx_service import KRXDataCollector, RSICalculator, SectorLeaderTracker
 from table_report_generator import TableReportGenerator
@@ -338,7 +338,7 @@ class KRXReportService:
         """일일 작업 실행"""
         self.logger.info("=== 일일 작업 시작 ===")
 
-        # KRX 로그인 세션 주입 (pykrx 내장 계정이 CD010 으로 실패하므로 필수)
+        # KRX 로그인 확인 (KRX 데이터 조회는 로그인 세션이 필수)
         try:
             install_krx_session()
             self.logger.info("KRX 로그인 세션 주입 완료")
